@@ -239,17 +239,36 @@ def premium_updated(premium, action=None):
 
 
 def _update_policy_insurees(policy):
-    policy.insuree_policies.filter(validity_to__isnull=True).update(
-        effective_date=policy.effective_date,
-        start_date=policy.start_date,
-        expiry_date=policy.expiry_date,
-    )
+    _set_insuree_policies_dates(policy)
 
 
 def _activate_insurees(policy, pay_date):
-    policy.insuree_policies.filter(validity_to__isnull=True).update(
-        effective_date=pay_date,
-    )
+    _set_insuree_policies_dates(policy, activation_date=pay_date)
+
+
+def _set_insuree_policies_dates(policy, activation_date=None):
+    """
+    The dates of the members (InsureePolicy) belong to the policy module, which may give
+    each member their own validity (OP-3321): it is asked to set them. A policy module
+    without that service gets the former behaviour (every member the policy dates, or the
+    pay date as effective date on re-activation).
+    """
+    try:
+        from policy.services import update_insuree_policies_dates
+    except ImportError:
+        update_insuree_policies_dates = None
+    if update_insuree_policies_dates is not None:
+        update_insuree_policies_dates(policy, activation_date=activation_date)
+        return
+    rows = policy.insuree_policies.filter(validity_to__isnull=True)
+    if activation_date is not None:
+        rows.update(effective_date=activation_date)
+    else:
+        rows.update(
+            effective_date=policy.effective_date,
+            start_date=policy.start_date,
+            expiry_date=policy.expiry_date,
+        )
 
 
 def check_unique_premium_receipt_code_within_product(code, policy_uuid=None, policy=None):
