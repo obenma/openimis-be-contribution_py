@@ -23,6 +23,8 @@ class InsureePoliciesDatesTest(TestCase):
         cls.product = create_test_product("CTIPDATE")
         cls.insuree = create_test_insuree(with_family=True, custom_props={"chf_id": "CTIPDATE1"})
         cls.policy = create_test_policy(cls.product, cls.insuree, link=True)
+        Policy.objects.filter(id=cls.policy.id).update(start_date=datetime.date(2024, 1, 1))
+        cls.policy.refresh_from_db()
 
     def test_policy_service_called(self):
         with mock.patch("policy.services.update_insuree_policies_dates") as service:
@@ -47,3 +49,10 @@ class InsureePoliciesDatesTest(TestCase):
         ip = InsureePolicy.objects.get(policy=self.policy, validity_to__isnull=True)
         self.assertEqual((datetime.date(2030, 1, 1), datetime.date(2024, 3, 3)),
                          (ip.expiry_date, ip.effective_date))
+
+    def test_activation_never_before_the_policy_start(self):
+        """a policy dated in the future is not active on the payment already"""
+        premium = mock.Mock(pay_date=datetime.date(2023, 11, 11))
+        self.assertEqual(datetime.date(2024, 1, 1), services._activation_date(self.policy, premium))
+        premium.pay_date = datetime.date(2024, 2, 2)
+        self.assertEqual(datetime.date(2024, 2, 2), services._activation_date(self.policy, premium))

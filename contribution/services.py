@@ -202,21 +202,16 @@ def premium_updated(premium, action=None):
 
     policy_balance = policy.value - premium.other_premiums()
     if premium.amount == policy_balance:
-        policy_status_premium_paid(
-            policy,
-            premium.pay_date
-            if premium.pay_date > policy.start_date
-            else policy.start_date,
-        )
+        policy_status_premium_paid(policy, _activation_date(policy, premium))
     elif premium.amount < policy_balance:
         # suspend already handledpremium
         if action == PremiumUpdateActionEnum.ENFORCE.value:
-            policy_status_premium_paid(policy, premium.pay_date)
+            policy_status_premium_paid(policy, _activation_date(policy, premium))
         # otherwise, just leave the policy unchanged
     elif premium.amount > policy_balance:
         if action != PremiumUpdateActionEnum.ENFORCE.value:
             logger.warning("action on premiums larger than the policy value")
-        policy_status_premium_paid(policy, premium.pay_date)
+        policy_status_premium_paid(policy, _activation_date(policy, premium))
     else:
         logger.warning(
             "The comparison between premium amount %s and policy value %s failed",
@@ -235,7 +230,15 @@ def premium_updated(premium, action=None):
         if policy.status == Policy.STATUS_ACTIVE:
             _update_policy_insurees(policy)
     elif policy.effective_date:
-        _activate_insurees(policy, premium.pay_date)
+        _activate_insurees(policy, _activation_date(policy, premium))
+
+
+def _activation_date(policy, premium):
+    """A payment activates from its date, never before the policy start: a policy dated
+    in the future is not active on the payment already."""
+    if policy.start_date and premium.pay_date < policy.start_date:
+        return policy.start_date
+    return premium.pay_date
 
 
 def _update_policy_insurees(policy):
@@ -251,7 +254,7 @@ def _set_insuree_policies_dates(policy, activation_date=None):
     The dates of the members (InsureePolicy) belong to the policy module, which may give
     each member their own validity (OP-3321): it is asked to set them. A policy module
     without that service gets the former behaviour (every member the policy dates, or the
-    pay date as effective date on re-activation).
+    activation date as effective date, never before the policy start).
     """
     try:
         from policy.services import update_insuree_policies_dates
@@ -262,6 +265,8 @@ def _set_insuree_policies_dates(policy, activation_date=None):
         return
     rows = policy.insuree_policies.filter(validity_to__isnull=True)
     if activation_date is not None:
+        if policy.start_date and activation_date < policy.start_date:
+            activation_date = policy.start_date
         rows.update(effective_date=activation_date)
     else:
         rows.update(
